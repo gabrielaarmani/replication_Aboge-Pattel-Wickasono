@@ -1,0 +1,225 @@
+---
+title: "Replication and Extension_Gov2020"
+author: "David Aboge, Nidhi Patel, Nic Wicaksono"
+paper: "Trauma /& Turnout: The Political Consequences of Traumatic Events"
+date: "Oct 2024
+output:
+  html_document:
+    toc: true
+    code_folding: hide
+  latex_engine: xelatex
+  number_sections: yes
+mainfont: Helvetica
+editor_options: 
+  chunk_output_type: inline
+---
+
+# Setting up the Data {.tabset}
+
+## Loading packages and data
+
+```{r setup, message = FALSE, warning = FALSE, results ='hide'}
+
+##### Packages #####
+
+library(arm)
+library(boot)
+library(descr)
+library(ggplot2)
+library(psych)
+library(GPArotation)
+# library(apsrtable)
+library(dplyr)
+library(RPMG)
+library(foreign)
+library(plyr)
+library(ggpubr)
+library(ggeffects)
+library(data.table)
+library(lubridate)
+library(haven)
+library(panelView)
+library(plm)
+library(multiwayvcov) 
+library(lmtest)
+library(wfe)
+library(PanelMatch)
+library(DataCombine)
+# library(Zelig)
+# library(Amelia)
+library(mi)
+library(stringr)
+library(lfe)
+library(clubSandwich)
+library(reghelper)
+library(stargazer)
+
+" setwd("I:/.shortcut-targets-by-id/1mzU-tavrkNyohejb8pBpzc1C6tOQCgbR/Replication Project/Marsh 2022 - Voting and Trauma/replication files") # set working directory "
+"knitr::opts_knit$set(root.dir = 'I:/.shortcut-targets-by-id/1mzU-tavrkNyohejb8pBpzc1C6tOQCgbR/Replication Project/Marsh 2022 - Voting and Trauma/replication files') "
+
+setwd("/Users/gabrielaarmani/Documents/Harvard/Gov 2020/Replication - Nidhi et al/Trauma Replication files")
+knitr::opts_knit$set(root.dir = "/Users/gabrielaarmani/Documents/Harvard/Gov 2020/Replication - Nidhi et al/Trauma Replication files")
+```
+
+# Load data
+
+```{r}
+
+load('cps.Rda') # individual-level CPS data
+load('cps_lag.Rda') # individual-level CPS data w/ one lag
+load('cps_2lag.Rda') # individual-level CPS data w/ two lags
+load('discop.Rda') # county-level data
+load('stanrob.Rda') # Stanford Mass Shootings data for robustness check
+
+# refer to "cps.Rda" as cps3 in code
+# refer to "cps_lag.Rda" as cps_lag in code
+# refer to "cps_2lag.Rda" as cps_2lag in code
+# refer to "discop.Rda" as discop in code
+# refer to "stanrob.Rda" as stan2 in code
+
+```
+
+
+## Creating Incumbent Vote Share Variable
+
+```{r} 
+
+table(discop$inc_part, discop$year)
+# -1 Republican, 1 Democrat, 0 if there is no incumbent 
+
+discop$rul_part <- discop$inc_part
+discop$rul_part[discop$year == 1988 | discop$year == 2008] <- -1
+discop$rul_part[discop$year == 2000 | discop$year == 2016] <- 1
+table(discop$rul_part, discop$year)
+# recoding years with no incumbent
+
+discop$rul_part[discop$rul_part == -1] <- 0 
+# making Republican incumbents "0" for ease of analysis 
+
+# GFA: not sure what is happening here: are you coding non-incumbents and Rep incumbents both as 0?
+
+discop$rul_vote_share[discop$rul_part == 1] <- discop$dem_share 
+discop$rul_vote_share[discop$rul_part == 0] <- discop$votes_gop/discop$votes_tot
+# creating incumbent vote share
+
+
+```
+
+
+## Generalized Two Way FEs Analysis 
+
+```{r}
+
+library(clubSandwich)
+
+# arson
+
+art_plm1 <- plm(rul_vote_share ~ tr_sh + perc_bl + pop_tot + income, # with controls
+           data = discop,
+           index = c('fips', 'year'),
+           model = 'within',
+           effect = 'twoways')
+coeftest(art_plm1, vcov = vcovHC(art_plm1, cluster = 'group')) 
+
+# shooting
+
+sht_plm1 <- plm(rul_vote_share ~ tr_ar + perc_bl + pop_tot + income +
+                  fatalities + injured, # with controls
+           data = discop,
+           index = c('fips', 'year'),
+           model = 'within',
+           effect = 'twoways')
+coeftest(sht_plm1, vcov = vcovHC(sht_plm1, cluster = 'group'))
+
+# natural disasters
+
+dist_plm2 <- plm(rul_vote_share ~ tr_dis2 + perc_bl + pop_tot + income, # with controls
+           data = discop,
+           index = c('fips', 'year'),
+           model = 'within',
+           effect = 'twoways')
+coeftest(dist_plm2, vcov = vcovHC(dist_plm2, cluster = 'group'))
+
+stargazer(art_plm1, sht_plm1, dist_plm2, title = "Effect of Traumatic Events on Ruling Party Vote Share, County Level", dep.var.caption = "Incumbent Presidential Party Vote Share", dep.var.labels = "", covariate.labels = c("Black Arson", "Mass Shootings", "Natural Disasters", "Pct. Population, Black", "Total Population", "Median HH Income", "Fatalities, Shootings", "Injuries, Shootings"))
+
+```
+
+
+## Adding Current Incumbent Party as a Control 
+
+``` {r} 
+
+
+## With controls
+
+# arson
+
+ar_lag2 <- lm(rul_vote_share ~ rul_part + tr_ar +
+                perc_bl + pop_tot + income,
+              data = discop)
+
+summary(ar_lag2) 
+coeftest(ar_lag2, vcov = vcovHC, type = 'HC1')
+
+# shooting
+
+sh_lag2 <- lm(rul_vote_share ~ rul_part + tr_sh +
+                perc_bl + pop_tot + income + 
+                fatalities + injured,
+              data = discop)
+
+summary(sh_lag2) 
+coeftest(sh_lag2, vcov = vcovHC, type = 'HC1')
+
+# natural disaster
+
+nat_lag2 <- lm(rul_vote_share ~ rul_part + tr_dis2 + 
+                perc_bl + pop_tot + income,
+              data = discop)
+
+summary(nat_lag2) 
+coeftest(nat_lag2, vcov = vcovHC, type = 'HC1')
+
+stargazer(ar_lag2, sh_lag2, nat_lag2, title = "Effect of Traumatic Events on Ruling Party Vote Share, County Level, with Incumbent Party Control Variable", dep.var.caption = "Incumbent Presidential Party Vote Share", dep.var.labels = "", covariate.labels = c("Incumbent Party,\\\\ 1 = Democratic", "Black Arson",  "Mass Shootings", "Natural Disasters", "Pct. Population, Black", "Total Population", "Median HH Income", "Fatalities, Shootings", "Injuries, Shootings"))
+
+```
+
+## Adding Interaction Effects - Party and Traumatic Event
+
+``` {r} 
+
+
+## With controls
+
+# arson - no observations for interaction effect?
+
+ar_int <- lm(rul_vote_share ~ rul_part + tr_ar +
+                perc_bl + pop_tot + income,
+              data = discop)
+
+summary(ar_int) 
+coeftest(ar_int, vcov = vcovHC, type = 'HC1')
+
+# shooting
+
+sh_int <- lm(rul_vote_share ~ rul_part*tr_sh +
+                perc_bl + pop_tot + income + 
+                fatalities + injured,
+              data = discop)
+
+summary(sh_int) 
+coeftest(sh_int, vcov = vcovHC, type = 'HC1')
+
+# natural disaster
+
+nat_int <- lm(rul_vote_share ~ rul_part*tr_dis2 + 
+                perc_bl + pop_tot + income,
+              data = discop)
+
+summary(nat_int) 
+coeftest(nat_int, vcov = vcovHC, type = 'HC1')
+
+stargazer(ar_int, sh_int, nat_int, title = "Effect of Traumatic Events on Ruling Party Vote Share, County Level, with Incumbent Party Control Variable", dep.var.caption = "Incumbent Presidential Party Vote Share", dep.var.labels = "", covariate.labels = c("Incumbent Party,\\\\ 1 = Democratic", "Black Arson",  "Mass Shootings", "Natural Disasters", "Pct. Population, Black", "Total Population", "Median HH Income", "Fatalities, Shootings", "Injuries, Shootings", "Inc. Party x Shootings", "Inc. Party x Disaster"))
+
+
+```
